@@ -1,65 +1,111 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
-st.set_page_config(page_title="Data Insights App", layout="wide")
+st.set_page_config(page_title="Smart Data Insights App", layout="wide")
 
-st.title("📊 Data Insights Web App")
+st.title("📊 Smart CSV Data Insights App")
 
-# Upload CSV
+# -------------------- FILE UPLOAD --------------------
 file = st.file_uploader("Upload your CSV file", type=["csv"])
 
-if file:
-    df = pd.read_csv(file)
+if file is not None:
 
-    st.subheader("🔍 Data Preview")
-    st.write(df.head())
+    # Safe CSV loading (fix UnicodeDecodeError)
+    try:
+        df = pd.read_csv(file, encoding="utf-8")
+    except UnicodeDecodeError:
+        file.seek(0)
+        df = pd.read_csv(file, encoding="ISO-8859-1")
+    except Exception:
+        file.seek(0)
+        df = pd.read_csv(file, encoding="latin1", errors="replace")
 
-    # ---------------- FILTER SECTION ----------------
-    st.subheader("🎯 Filter Data")
+    st.success("File loaded successfully!")
 
-    col1, col2 = st.columns(2)
+    # -------------------- SIDEBAR FILTERS --------------------
+    st.sidebar.header("🔎 Filters")
 
-    with col1:
-        selected_column = st.selectbox("Select column to filter", df.columns)
+    columns = df.columns.tolist()
 
-    with col2:
-        unique_values = df[selected_column].dropna().unique()
-        selected_value = st.selectbox("Select value", unique_values)
+    selected_columns = st.sidebar.multiselect(
+        "Select Columns",
+        columns,
+        default=columns
+    )
 
-    filtered_df = df[df[selected_column] == selected_value]
+    df = df[selected_columns]
 
-    st.write("Filtered Data", filtered_df)
+    # Search feature
+    search = st.sidebar.text_input("Search in data")
 
-    # ---------------- COLUMN SELECT ----------------
-    st.subheader("📂 Select Columns")
+    if search:
+        df = df[df.astype(str).apply(lambda row: row.str.contains(search, case=False, na=False)).any(axis=1)]
 
-    selected_columns = st.multiselect("Choose columns to display", df.columns)
+    # -------------------- DATA PREVIEW --------------------
+    st.subheader("📌 Data Preview")
+    st.dataframe(df)
 
-    if selected_columns:
-        st.write(df[selected_columns])
+    st.write("Shape:", df.shape)
+
+    # -------------------- MISSING VALUES --------------------
+    st.subheader("📉 Missing Values")
+    st.dataframe(df.isnull().sum())
+
+    # -------------------- BASIC AI INSIGHTS --------------------
+    st.subheader("🧠 AI Insights (Auto Analysis)")
+
+    numeric_df = df.select_dtypes(include="number")
+
+    if not numeric_df.empty:
+        st.write("📊 Summary Statistics")
+        st.dataframe(numeric_df.describe())
+
+        st.write("📌 Key Observations")
+
+        for col in numeric_df.columns:
+            st.write(f"- {col}: Avg = {numeric_df[col].mean():.2f}, Max = {numeric_df[col].max()}, Min = {numeric_df[col].min()}")
+
+        if numeric_df.shape[1] > 1:
+            st.write("🔗 Correlation Matrix")
+            st.dataframe(numeric_df.corr())
     else:
-        st.write("Showing full dataset")
-        st.write(df)
+        st.info("No numeric columns found for statistical insights.")
 
-    # ---------------- SUMMARY ----------------
-    st.subheader("📈 Summary Statistics")
-    st.write(df.describe())
+    # -------------------- CHART SECTION --------------------
+    st.subheader("📈 Data Visualizations")
 
-    # ---------------- CHARTS ----------------
-    st.subheader("📊 Visualizations")
+    chart_type = st.selectbox("Choose Chart Type", ["Bar Chart", "Pie Chart", "Histogram"])
 
-    numeric_columns = df.select_dtypes(include=['number']).columns
+    if not df.empty:
 
-    if len(numeric_columns) > 0:
-        chart_column = st.selectbox("Select numeric column for chart", numeric_columns)
+        col = st.selectbox("Select Column for Chart", df.columns)
 
-        st.write("Bar Chart")
-        st.bar_chart(df[chart_column])
+        if chart_type == "Bar Chart":
+            st.plotly_chart(px.bar(df[col].value_counts().reset_index(),
+                                   x="index", y=col,
+                                   title="Bar Chart"))
 
-        st.write("Line Chart")
-        st.line_chart(df[chart_column])
-    else:
-        st.write("No numeric columns available for charts")
+        elif chart_type == "Pie Chart":
+            st.plotly_chart(px.pie(df, names=col, title="Pie Chart"))
+
+        elif chart_type == "Histogram":
+            if pd.api.types.is_numeric_dtype(df[col]):
+                st.plotly_chart(px.histogram(df, x=col, title="Histogram"))
+            else:
+                st.warning("Histogram works only for numeric columns.")
+
+    # -------------------- DOWNLOAD CLEANED DATA --------------------
+    st.subheader("⬇️ Download Processed Data")
+
+    csv = df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        "Download CSV",
+        csv,
+        "processed_data.csv",
+        "text/csv"
+    )
 
 else:
-    st.info("👆 Upload a CSV file to get started")
+    st.info("Upload a CSV file to start analysis 👆")
